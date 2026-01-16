@@ -1,304 +1,207 @@
+
 import React, { useState } from 'react';
 import { User, CauseAction, ActionType } from '../types';
+import { getFixedDailyMission } from '../services/missionData';
 
 interface ProfileProps {
   user: User;
   actions: CauseAction[];
   onUpdateUser: (updatedUser: User) => void;
   onLogout: () => void;
-  onClearData?: () => void;
 }
 
-// Expanded Color Palette for Cover
-const COLORS = [
-    { name: 'Neon', class: 'bg-primary' },
-    { name: 'Blue', class: 'bg-blue-600' },
-    { name: 'Indigo', class: 'bg-indigo-600' },
-    { name: 'Purple', class: 'bg-purple-600' },
-    { name: 'Pink', class: 'bg-pink-500' },
-    { name: 'Red', class: 'bg-red-600' },
-    { name: 'Orange', class: 'bg-orange-500' },
-    { name: 'Green', class: 'bg-green-600' },
-    { name: 'Teal', class: 'bg-teal-600' },
-    { name: 'Black', class: 'bg-gray-900' },
+const COLOR_GRID = [
+    'bg-primary', 'bg-action-blue', 'bg-action-green', 'bg-action-orange',
+    'bg-purple-600', 'bg-pink-500', 'bg-red-500', 'bg-orange-500',
+    'bg-amber-500', 'bg-lime-500', 'bg-emerald-500', 'bg-teal-500',
+    'bg-sky-500', 'bg-indigo-500', 'bg-violet-500', 'bg-rose-500'
 ];
 
-export const Profile: React.FC<ProfileProps> = ({ user, actions, onUpdateUser, onLogout, onClearData }) => {
+export const Profile: React.FC<ProfileProps> = ({ user, actions, onUpdateUser, onLogout }) => {
     const [isEditing, setIsEditing] = useState(false);
-    const [editFirstName, setEditFirstName] = useState(user.firstName);
-    const [editLastName, setEditLastName] = useState(user.lastName);
-    const [editColor, setEditColor] = useState(user.avatarColor); // Now acts as Cover Color
-    const [editPhotoUrl, setEditPhotoUrl] = useState(user.photoUrl || '');
-    
-    // Seed for default random images if no URL is provided
-    const [photoSeed, setPhotoSeed] = useState(user.uid); 
+    const [selectedBadge, setSelectedBadge] = useState<{label: string, desc: string, icon: string, color: string} | null>(null);
 
-    const myActions = actions.filter(a => a.userId === user.uid);
+    const [editFirstName, setEditFirstName] = useState(user.firstName);
+    const [editColor, setEditColor] = useState(user.avatarColor);
     
-    const stats = [
-        { type: ActionType.OREI, count: myActions.filter(a => a.action === ActionType.OREI).length, label: 'Orações', color: 'text-action-blue', bg: 'bg-blue-50', icon: 'volunteer_activism' },
-        { type: ActionType.CUIDEI, count: myActions.filter(a => a.action === ActionType.CUIDEI).length, label: 'Cuidado', color: 'text-action-green', bg: 'bg-green-50', icon: 'potted_plant' },
-        { type: ActionType.COMPARTILHEI, count: myActions.filter(a => a.action === ActionType.COMPARTILHEI).length, label: 'Evangelismo', color: 'text-action-orange', bg: 'bg-orange-50', icon: 'forum' },
-    ];
+    const myActions = actions.filter(a => a.userId === user.uid);
+    const count = (type: ActionType) => myActions.filter(a => a.action === type).length;
+    
+    const currentMission = getFixedDailyMission();
 
     const handleSave = () => {
         onUpdateUser({
             ...user,
             firstName: editFirstName,
-            lastName: editLastName,
             avatarColor: editColor,
-            photoUrl: editPhotoUrl.trim() !== '' ? editPhotoUrl : undefined
         });
         setIsEditing(false);
     };
 
-    // --- BACKUP LOGIC ---
-    const handleExportData = () => {
-        const data = {
-            user: localStorage.getItem('vibeteen_user'),
-            members: localStorage.getItem('vibeteen_members'),
-            actions: localStorage.getItem('vibeteen_actions'),
-            prayers: localStorage.getItem('vibeteen_prayers'),
-            timestamp: new Date().toISOString()
-        };
-        
-        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `vibeteen_backup_${user.firstName}_${new Date().toISOString().split('T')[0]}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    };
-
-    const handleImportData = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-
-        if(!window.confirm("Isso substituirá os dados atuais deste dispositivo pelos dados do arquivo. Deseja continuar?")) {
-            return;
-        }
-
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const content = e.target?.result as string;
-                const data = JSON.parse(content);
-                
-                if (data.user) localStorage.setItem('vibeteen_user', data.user);
-                if (data.members) localStorage.setItem('vibeteen_members', data.members);
-                if (data.actions) localStorage.setItem('vibeteen_actions', data.actions);
-                if (data.prayers) localStorage.setItem('vibeteen_prayers', data.prayers);
-                
-                alert("Dados importados com sucesso! O app será recarregado.");
-                window.location.reload();
-            } catch (error) {
-                alert("Erro ao ler o arquivo de backup.");
-                console.error(error);
-            }
-        };
-        reader.readAsText(file);
-    };
-
-    const currentImageSrc = editPhotoUrl && editPhotoUrl.trim() !== '' 
-        ? editPhotoUrl 
-        : `https://picsum.photos/200/200?random=${photoSeed}`;
-
     return (
-        <div className="w-full h-full overflow-y-auto bg-background pb-32">
-            
-            {/* --- PROFILE COVER --- */}
-            <div className={`w-full h-48 relative ${isEditing ? editColor : user.avatarColor} transition-colors duration-500`}>
-                <div className="absolute inset-0 bg-gradient-to-b from-black/10 to-black/30"></div>
-                
-                {/* Header Buttons */}
-                <div className="absolute top-4 right-4 z-20">
-                    {!isEditing ? (
-                        <button 
-                            onClick={() => setIsEditing(true)}
-                            className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/20 backdrop-blur-md border border-white/40 text-xs font-bold uppercase tracking-wider text-white hover:bg-white/30 transition-all"
-                        >
-                            <span className="material-symbols-outlined text-sm">edit</span> Editar Perfil
-                        </button>
-                    ) : (
-                        <button 
-                            onClick={handleSave}
-                            className="flex items-center gap-2 px-6 py-2 rounded-full bg-white text-xs font-bold uppercase tracking-wider text-black hover:scale-105 shadow-lg transition-all"
-                        >
-                            <span className="material-symbols-outlined text-sm">check</span> Salvar
-                        </button>
-                    )}
+        <div className="w-full h-full overflow-y-auto bg-background pb-32 no-scrollbar">
+            {/* Header com Cover */}
+            <div className={`w-full h-44 relative ${isEditing ? editColor : user.avatarColor} transition-colors duration-500`}>
+                <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-transparent"></div>
+                <div className="absolute top-6 right-6 z-20">
+                    <button onClick={() => isEditing ? handleSave() : setIsEditing(true)} className="px-5 py-2.5 rounded-full bg-white text-black font-black text-[10px] uppercase shadow-2xl transition-all active:scale-90">
+                        {isEditing ? 'SALVAR' : 'EDITAR'}
+                    </button>
                 </div>
             </div>
 
-            <div className="px-4 relative -mt-16 mb-8">
-                {/* Avatar & Badge */}
-                <div className="flex flex-col items-center">
-                    <div className="relative group">
-                        <div className="w-32 h-32 rounded-full border-[6px] border-white bg-gray-200 shadow-xl overflow-hidden relative z-10">
-                            <img src={currentImageSrc} alt="Profile" className="w-full h-full object-cover" />
-                        </div>
-                        
-                        {/* Verified Badge */}
-                        <div className="absolute bottom-1 right-1 z-20">
-                            <div className="bg-blue-600 rounded-full p-1.5 border-4 border-white shadow-md flex items-center justify-center" title="Membro Verificado">
-                                <span className="material-symbols-outlined text-white text-base font-bold filled">verified</span>
-                            </div>
-                        </div>
+            <div className="px-6 relative -mt-16 mb-6 flex flex-col items-center">
+                <div className="relative group">
+                    <div className={`w-32 h-32 rounded-[3rem] border-[8px] border-white shadow-2xl relative z-10 rotate-2 group-hover:rotate-0 transition-transform duration-500 flex items-center justify-center ${isEditing ? editColor : user.avatarColor}`}>
+                        <span className="material-symbols-outlined text-white text-5xl font-black opacity-40">person</span>
                     </div>
-
-                    {/* Edit Mode Content */}
+                    <div className="absolute -bottom-2 -right-2 z-20 bg-black text-primary px-3 py-1 rounded-xl border-4 border-white text-[12px] font-black italic shadow-lg">
+                        LVL {user.level || 1}
+                    </div>
+                </div>
+                
+                <div className="text-center mt-6 w-full max-w-[280px]">
                     {isEditing ? (
-                        <div className="w-full max-w-sm mt-6 space-y-6 animate-in fade-in slide-in-from-bottom-4 bg-white p-6 rounded-3xl border border-gray-100 shadow-xl">
-                            
-                            {/* Names */}
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Nome</label>
-                                    <input 
-                                        type="text" 
-                                        value={editFirstName}
-                                        onChange={(e) => setEditFirstName(e.target.value)}
-                                        className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold text-gray-900 outline-none focus:border-black focus:ring-1 focus:ring-black transition-all"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Sobrenome</label>
-                                    <input 
-                                        type="text" 
-                                        value={editLastName}
-                                        onChange={(e) => setEditLastName(e.target.value)}
-                                        className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold text-gray-900 outline-none focus:border-black focus:ring-1 focus:ring-black transition-all"
-                                    />
-                                </div>
-                            </div>
-
-                            {/* Photo URL */}
-                            <div>
-                                <label className="text-[10px] font-bold text-gray-400 uppercase ml-1 mb-1 block">Foto de Perfil (Link/URL)</label>
-                                <div className="flex gap-2">
-                                    <input 
-                                        type="text" 
-                                        placeholder="Cole o link da imagem aqui..."
-                                        value={editPhotoUrl}
-                                        onChange={(e) => setEditPhotoUrl(e.target.value)}
-                                        className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium text-gray-900 outline-none focus:border-black focus:ring-1 focus:ring-black transition-all placeholder-gray-400"
-                                    />
-                                    {editPhotoUrl && (
-                                        <button 
-                                            onClick={() => setEditPhotoUrl('')}
-                                            className="px-3 rounded-xl bg-red-50 text-red-500 border border-red-100 hover:bg-red-100"
-                                            title="Remover foto"
-                                        >
-                                            <span className="material-symbols-outlined text-lg">delete</span>
-                                        </button>
-                                    )}
-                                </div>
-                                <p className="text-[10px] text-gray-400 mt-1 ml-1">Cole qualquer link de imagem da web (ex: Google Imagens, Instagram CDN, etc).</p>
-                            </div>
-
-                            {/* Cover Color Picker */}
-                            <div>
-                                <label className="text-[10px] font-bold text-gray-400 uppercase ml-1 mb-3 block">Cor da Capa</label>
-                                <div className="flex flex-wrap gap-3 justify-center bg-gray-50 p-4 rounded-2xl border border-gray-100">
-                                    {COLORS.map(c => (
+                        <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-top-2">
+                            <input 
+                                type="text" 
+                                value={editFirstName} 
+                                onChange={(e) => setEditFirstName(e.target.value)}
+                                className="text-center w-full bg-white border-2 border-gray-100 rounded-2xl px-4 py-3 text-xl font-black italic uppercase tracking-tighter outline-none focus:border-black transition-all"
+                                placeholder="Seu Nome"
+                            />
+                            <div className="bg-white/80 backdrop-blur p-4 rounded-[2rem] border border-gray-100 shadow-xl">
+                                <p className="text-[9px] font-black uppercase text-gray-400 mb-3 tracking-widest text-center">Cor do Perfil</p>
+                                <div className="grid grid-cols-4 gap-2.5">
+                                    {COLOR_GRID.map((colorClass) => (
                                         <button
-                                            key={c.name}
-                                            onClick={() => setEditColor(c.class)}
-                                            className={`w-8 h-8 rounded-full shadow-sm transition-all duration-300 ${c.class} ${editColor === c.class ? 'ring-4 ring-black/20 scale-110' : 'hover:scale-105'}`}
-                                            title={c.name}
+                                            key={colorClass}
+                                            onClick={() => setEditColor(colorClass)}
+                                            className={`w-full aspect-square rounded-xl border-4 transition-all ${colorClass} ${editColor === colorClass ? 'border-black scale-110 z-10 shadow-lg' : 'border-transparent hover:scale-105'}`}
                                         />
                                     ))}
                                 </div>
                             </div>
                         </div>
                     ) : (
-                        /* Read Only View */
-                        <div className="text-center mt-3">
-                            <h2 className="text-3xl font-black italic text-gray-900 leading-none tracking-tight">
-                                {user.firstName} {user.lastName}
-                            </h2>
-                            <div className="flex items-center justify-center gap-1.5 mt-2">
-                                <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                                <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Membro Ativo</span>
-                            </div>
-                        </div>
+                        <>
+                            <h2 className="text-4xl font-black italic text-gray-900 leading-none tracking-tighter uppercase">{user.firstName}</h2>
+                            <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest mt-2">Geração Vibe Teen</p>
+                        </>
                     )}
                 </div>
             </div>
 
-            {!isEditing && (
-                <div className="px-4">
-                    <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-black italic text-gray-900">MEU IMPACTO</h3>
-                        <span className="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Acumulado</span>
+            {/* STREAK */}
+            <div className="px-6 mb-8">
+                <div className="bg-orange-50 border-4 border-orange-100 rounded-[2.5rem] p-8 flex flex-col items-center justify-center relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-125 transition-transform duration-700">
+                        <span className="material-symbols-outlined text-9xl filled text-orange-600">local_fire_department</span>
                     </div>
+                    <span className="material-symbols-outlined text-orange-500 text-6xl filled mb-2 drop-shadow-lg animate-pulse">local_fire_department</span>
+                    <span className="text-orange-600 text-7xl font-black italic leading-none">{user.streak || 0}</span>
+                    <span className="text-orange-400 text-xs font-black uppercase tracking-[0.4em] mt-2">DÍAS CONSECUTIVOS</span>
+                </div>
+            </div>
 
-                    <div className="space-y-3 mb-8">
-                        {stats.map(stat => (
-                            <div key={stat.label} className="flex items-center p-4 rounded-2xl bg-white border border-gray-100 shadow-sm gap-4 group hover:border-gray-200 transition-colors">
-                                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${stat.bg} ${stat.color} border border-black/5`}>
-                                    <span className="material-symbols-outlined text-2xl">{stat.icon}</span>
-                                </div>
-                                <div className="flex-1">
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{stat.label}</p>
-                                    <div className="flex items-end gap-2">
-                                        <span className="text-2xl font-black text-gray-900 leading-none">{stat.count}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
+            {/* CONTADORES */}
+            <div className="px-6 mb-10">
+                <div className="grid grid-cols-4 gap-2 bg-gray-900 p-6 rounded-[2.5rem] shadow-2xl">
+                    <Counter icon="volunteer_activism" color="text-action-blue" val={count(ActionType.OREI)} label="ORAR" />
+                    <Counter icon="potted_plant" color="text-action-green" val={count(ActionType.CUIDEI)} label="CUIDAR" />
+                    <Counter icon="forum" color="text-action-orange" val={count(ActionType.COMPARTILHEI)} label="PREGAR" />
+                    <Counter icon="person_add" color="text-purple-400" val={count(ActionType.CONVIDEI)} label="VIP" />
+                </div>
+            </div>
+
+            <div className="px-6 space-y-10">
+                {/* MISSÃO DO DIA FIXA (Antiga Voz do Reino) */}
+                <div className="bg-primary p-8 rounded-[2.5rem] shadow-xl relative overflow-hidden group">
+                    <div className="absolute -right-6 -bottom-6 opacity-10 group-hover:scale-110 transition-transform">
+                        <span className="material-symbols-outlined text-[120px] text-black">task_alt</span>
                     </div>
+                    <h3 className="text-black/40 font-black italic text-[10px] uppercase tracking-widest mb-3">Missão Coletiva do Dia</h3>
+                    <p className="text-black font-black text-xl leading-tight">
+                        "{currentMission}"
+                    </p>
+                </div>
 
-                    <div className="border-t border-gray-100 pt-8 space-y-3">
-                        
-                        {/* Backup Buttons */}
-                        <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200 mb-4">
-                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 text-center">Sincronização entre Dispositivos</p>
-                            <div className="flex gap-2">
-                                <button 
-                                    onClick={handleExportData}
-                                    className="flex-1 flex flex-col items-center justify-center gap-1 p-3 rounded-xl bg-white border border-gray-200 hover:border-blue-300 hover:text-blue-600 transition-all text-gray-600"
-                                >
-                                    <span className="material-symbols-outlined text-2xl">download</span>
-                                    <span className="text-[10px] font-bold uppercase">Exportar Dados</span>
-                                </button>
-                                <label className="flex-1 flex flex-col items-center justify-center gap-1 p-3 rounded-xl bg-white border border-gray-200 hover:border-green-300 hover:text-green-600 transition-all text-gray-600 cursor-pointer">
-                                    <span className="material-symbols-outlined text-2xl">upload_file</span>
-                                    <span className="text-[10px] font-bold uppercase">Importar Dados</span>
-                                    <input type="file" onChange={handleImportData} className="hidden" accept=".json" />
-                                </label>
-                            </div>
-                            <p className="text-[9px] text-gray-400 text-center mt-2 leading-tight">
-                                Use Exportar no celular e envie o arquivo para o PC. Depois use Importar no PC para carregar o mural.
-                            </p>
+                {/* CONQUISTAS AUTOMÁTICAS */}
+                <div className="space-y-6">
+                    <h3 className="text-[11px] font-black italic text-gray-400 uppercase tracking-widest pl-2">Troféus de Impacto</h3>
+                    <div className="grid grid-cols-3 gap-4">
+                        <Badge 
+                            active={myActions.length >= 1} icon="emoji_events" label="Novato" color="bg-orange-500" 
+                            onClick={() => setSelectedBadge({icon: "emoji_events", color: "bg-orange-500", label: "Novato", desc: "A chama foi acesa! Você registrou sua primeira ação no Reino."})}
+                        />
+                        <Badge 
+                            active={count(ActionType.OREI) >= 10} icon="volunteer_activism" label="Intercessor" color="bg-action-blue" 
+                            onClick={() => setSelectedBadge({icon: "volunteer_activism", color: "bg-action-blue", label: "Intercessor", desc: "Você orou por 10 pessoas. Sua vida de oração está gerando frutos eternos!"})}
+                        />
+                        <Badge 
+                            active={count(ActionType.COMPARTILHEI) >= 10} icon="campaign" label="Evangelista" color="bg-red-500" 
+                            onClick={() => setSelectedBadge({icon: "campaign", color: "bg-red-500", label: "Evangelista", desc: "Pregou o evangelho 10 vezes. O céu está em festa por sua ousadia!"})}
+                        />
+                        <Badge 
+                            active={count(ActionType.CONVIDEI) >= 10} icon="stars" label="Influencer" color="bg-purple-600" 
+                            onClick={() => setSelectedBadge({icon: "stars", color: "bg-purple-600", label: "Influencer", desc: "Trouxe 10 amigos para conhecer a Jesus. Você é um embaixador VIP!"})}
+                        />
+                        <Badge 
+                            active={myActions.length >= 50} icon="military_tech" label="Embaixador" color="bg-yellow-600" 
+                            onClick={() => setSelectedBadge({icon: "military_tech", color: "bg-yellow-600", label: "Embaixador do Reino", desc: "Alcançou 50 ações de fé. Seu impacto é inegável e sua constância inspira todos!"})}
+                        />
+                         <Badge 
+                            active={(user.streak || 0) >= 7} icon="bolt" label="Pilar Fogo" color="bg-orange-600" 
+                            onClick={() => setSelectedBadge({icon: "bolt", color: "bg-orange-600", label: "Pilar de Fogo", desc: "7 dias seguidos de fé. A constância é a base da maturidade espiritual."})}
+                        />
+                    </div>
+                </div>
+
+                <div className="pt-4 border-t border-gray-100">
+                    <button onClick={onLogout} className="w-full p-5 rounded-3xl bg-gray-50 text-gray-400 font-black text-[10px] uppercase tracking-[0.3em] hover:text-red-500 transition-colors">
+                        Sair da Conta
+                    </button>
+                </div>
+            </div>
+
+            {/* Modal de Detalhe da Conquista */}
+            {selectedBadge && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md animate-in fade-in" onClick={() => setSelectedBadge(null)}>
+                    <div className="bg-white rounded-[3rem] p-8 max-w-xs text-center shadow-2xl border-[6px] border-primary animate-in zoom-in" onClick={e => e.stopPropagation()}>
+                        <div className={`w-24 h-24 rounded-[2rem] flex items-center justify-center mx-auto mb-6 ${selectedBadge.color} text-white shadow-xl rotate-3`}>
+                            <span className="material-symbols-outlined text-5xl">{selectedBadge.icon}</span>
                         </div>
-
+                        <h4 className="text-3xl font-black italic mb-3 leading-none tracking-tighter uppercase">{selectedBadge.label}</h4>
+                        <p className="text-gray-600 text-[13px] font-bold leading-relaxed">{selectedBadge.desc}</p>
                         <button 
-                            onClick={onLogout}
-                            className="w-full flex items-center justify-center gap-2 p-4 rounded-2xl bg-gray-50 text-gray-600 font-bold text-xs uppercase tracking-widest border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-all"
+                            onClick={() => setSelectedBadge(null)} 
+                            className="mt-8 w-full py-4 bg-black text-white rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-transform"
                         >
-                            <span className="material-symbols-outlined text-lg">logout</span>
-                            Sair da Conta
+                            FECHAR
                         </button>
-
-                         {onClearData && (
-                            <button 
-                                onClick={onClearData}
-                                className="w-full text-center text-[10px] text-gray-300 hover:text-red-400 font-bold uppercase tracking-widest transition-colors py-2"
-                            >
-                                Resetar Dados Locais
-                            </button>
-                        )}
-                        
-                        <div className="flex justify-center mt-4">
-                            <span className="text-[10px] font-bold text-gray-300 uppercase tracking-[0.2em]">VIBE TEEN ID: {user.uid.slice(-6)}</span>
-                        </div>
                     </div>
                 </div>
             )}
         </div>
     );
 };
+
+const Counter = ({icon, color, val, label}: any) => (
+    <div className="flex flex-col items-center">
+        <span className={`material-symbols-outlined ${color} text-2xl mb-1`}>{icon}</span>
+        <span className="text-white text-xl font-black italic leading-none">{val}</span>
+        <span className="text-white/30 text-[8px] font-black uppercase tracking-tighter mt-1">{label}</span>
+    </div>
+);
+
+const Badge = ({ active, icon, label, color, onClick }: any) => (
+    <div 
+        onClick={onClick} 
+        className={`flex flex-col items-center p-5 rounded-[2.5rem] border transition-all active:scale-90 ${active ? 'bg-white border-gray-100 shadow-xl' : 'bg-gray-50 border-transparent opacity-20 grayscale'}`}
+    >
+        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white mb-3 ${active ? color : 'bg-gray-300'} shadow-md`}>
+            <span className="material-symbols-outlined text-3xl">{icon}</span>
+        </div>
+        <span className="text-[9px] font-black uppercase text-center leading-none tracking-tighter">{label}</span>
+    </div>
+);

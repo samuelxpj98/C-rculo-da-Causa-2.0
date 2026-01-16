@@ -1,8 +1,10 @@
+
 // Tipos de Ação
 export enum ActionType {
     OREI = 'orei',                // Cor: Azul
     CUIDEI = 'cuidei',            // Cor: Verde
-    COMPARTILHEI = 'compartilhei' // Cor: Laranja
+    COMPARTILHEI = 'compartilhei', // Cor: Laranja
+    CONVIDEI = 'convidei'         // Cor: Roxo (Novo)
 }
   
 export type UserRole = 'member' | 'visitor';
@@ -12,25 +14,30 @@ export interface User {
     uid: string;
     firstName: string;
     lastName: string;
-    email: string; // Used as login
+    email: string; 
     avatarColor: string;
-    photoUrl?: string; // New field for custom image URL
+    photoUrl?: string; 
     church?: 'Vibe Teen' | 'Outra Igreja';
     role: UserRole;
     createdAt: string;
+    // Gamificação
+    xp: number;
+    level: number;
+    streak: number;
+    lastActionDate?: string;
 }
 
-// A Ação (O Impacto)
+// A Ação
 export interface CauseAction {
     id: string;
     userId: string;
     userName: string;
     userColor: string;
-    userPhotoUrl?: string;    // Foto do usuário no momento (ou atualizada)
-    friendName: string;       // Quem recebeu a ação (ex: "João")
-    action: ActionType;       // Tipo
-    timestamp: string;        // Data ISO
-    prayedBy: string[];       // Quem "orou"/curtiu a ação
+    userPhotoUrl?: string;    
+    friendName: string;       
+    action: ActionType;       
+    timestamp: string;        
+    prayedBy: string[];       
 }
 
 export interface Coordinates {
@@ -46,9 +53,9 @@ export interface PrayerRequest {
     userId: string;
     userName: string;
     userAvatarColor: string;
-    userPhotoUrl?: string; // Foto do usuário
+    userPhotoUrl?: string; 
     category: PrayerCategory;
     description: string;
-    prayedBy: string[]; // Lista de UIDs de quem orou
+    prayedBy: string[]; 
     timestamp: string;
 }

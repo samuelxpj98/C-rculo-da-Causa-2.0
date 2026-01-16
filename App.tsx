@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect } from 'react';
 import { User, CauseAction, ActionType, PrayerRequest, PrayerCategory } from './types';
-import { getDailyMission } from './services/geminiService';
+import { getFixedDailyMission } from './services/missionData';
 import { Mural } from './components/Mural';
 import { ActionForm } from './components/ActionForm';
 import { Stats } from './components/Stats';
@@ -8,401 +9,186 @@ import { Profile } from './components/Profile';
 import { MembersList } from './components/MembersList';
 import { WelcomeScreen } from './components/WelcomeScreen';
 
-// Firebase Imports
 import { db } from './services/firebaseConfig';
 import { 
-    collection, 
-    addDoc, 
-    onSnapshot, 
-    query, 
-    orderBy, 
-    doc, 
-    updateDoc, 
-    setDoc,
-    where,
-    getDocs
+    collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, setDoc, where, getDocs
 } from 'firebase/firestore';
 
 const App: React.FC = () => {
-  // --- STATE ---
-  // Nota: Não inicializamos mais com localStorage, pois os dados virão do Firebase
   const [user, setUser] = useState<User | null>(() => {
-      // Mantemos apenas a sessão do usuário localmente para ele não precisar logar toda vez que der F5
       try {
           const savedUser = localStorage.getItem('vibeteen_user_session');
           return savedUser ? JSON.parse(savedUser) : null;
-      } catch (e) {
-          return null;
-      }
+      } catch (e) { return null; }
   });
 
   const [members, setMembers] = useState<User[]>([]);
   const [actions, setActions] = useState<CauseAction[]>([]);
   const [prayerRequests, setPrayerRequests] = useState<PrayerRequest[]>([]);
-
   const [currentView, setCurrentView] = useState<'mural' | 'rank' | 'members' | 'profile'>('mural');
   const [showAddForm, setShowAddForm] = useState(false);
-  const [dailyMission, setDailyMission] = useState<string>('');
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [dailyMission, setDailyMission] = useState<string>(getFixedDailyMission());
+  const [toastMessage, setToastMessage] = useState<{msg: string, icon: string} | null>(null);
 
-  // --- FIREBASE REAL-TIME LISTENERS ---
-
-  // 1. Ouvir Ações (Actions) em tempo real
   useEffect(() => {
     const q = query(collection(db, "actions"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        const loadedActions = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        })) as CauseAction[];
-        setActions(loadedActions);
-    });
-    return () => unsubscribe();
+    return onSnapshot(q, (snapshot) => setActions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as CauseAction[]));
   }, []);
 
-  // 2. Ouvir Pedidos de Oração (PrayerRequests) em tempo real
   useEffect(() => {
     const q = query(collection(db, "prayers"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        const loadedPrayers = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        })) as PrayerRequest[];
-        setPrayerRequests(loadedPrayers);
+    return onSnapshot(q, (snapshot) => {
+        setPrayerRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as PrayerRequest[]);
     });
-    return () => unsubscribe();
   }, []);
 
-  // 3. Ouvir Membros (Users) em tempo real
   useEffect(() => {
     const q = query(collection(db, "users"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        const loadedMembers = snapshot.docs.map(doc => ({
-            ...doc.data()
-        })) as User[];
-        setMembers(loadedMembers);
-        
-        // Se o usuário atual estiver logado, atualiza os dados dele também para garantir sincronia
-        if (user) {
-            const me = loadedMembers.find(m => m.uid === user.uid);
+    return onSnapshot(q, (snapshot) => {
+        const ms = snapshot.docs.map(doc => ({ ...doc.data() })) as User[];
+        setMembers(ms);
+        if (user) { 
+            const me = ms.find(m => m.uid === user.uid); 
             if (me) {
-                 setUser(me);
-                 localStorage.setItem('vibeteen_user_session', JSON.stringify(me));
-            }
+                setUser(me);
+                localStorage.setItem('vibeteen_user_session', JSON.stringify(me));
+            } 
         }
     });
-    return () => unsubscribe();
-  }, [user?.uid]); // Dependência apenas no UID para evitar loops, mas atualiza se o user mudar
+  }, [user?.uid]);
 
-
-  // --- SESSION PERSISTENCE ---
+  // Atualizar missão ao mudar o dia (se o app ficar aberto na virada)
   useEffect(() => {
-      if (user) localStorage.setItem('vibeteen_user_session', JSON.stringify(user));
-      else localStorage.removeItem('vibeteen_user_session');
-  }, [user]);
+    const interval = setInterval(() => {
+        setDailyMission(getFixedDailyMission());
+    }, 1000 * 60 * 30); // Checa a cada 30min
+    return () => clearInterval(interval);
+  }, []);
 
-  // Toast Timer
-  useEffect(() => {
-      if (toastMessage) {
-          const timer = setTimeout(() => setToastMessage(null), 3000);
-          return () => clearTimeout(timer);
-      }
-  }, [toastMessage]);
-
-  // --- API ---
-  useEffect(() => {
-    const fetchMission = async () => {
-        const mission = await getDailyMission();
-        setDailyMission(mission);
-    };
-    fetchMission();
-  }, []); 
-
-  // --- HANDLERS ---
-
-  const handleLogin = async (incomingUser: User) => {
-      try {
-        // Verificar se usuário já existe no Firebase pelo email (loginId)
-        const usersRef = collection(db, "users");
-        const q = query(usersRef, where("email", "==", incomingUser.email));
-        const querySnapshot = await getDocs(q);
-
-        let finalUser = incomingUser;
-
-        if (!querySnapshot.empty) {
-            // Usuário existe: Logar com dados do banco
-            finalUser = querySnapshot.docs[0].data() as User;
-            setToastMessage(`Bem-vindo de volta, ${finalUser.firstName}!`);
-        } else {
-            // Usuário novo: Criar no banco
-            // Usamos o UID como ID do documento para facilitar updates futuros
-            await setDoc(doc(db, "users", incomingUser.uid), incomingUser);
-            setToastMessage("Conta criada com sucesso!");
-        }
-
-        setUser(finalUser);
-      } catch (error) {
-          console.error("Erro no login:", error);
-          alert("Erro ao conectar ao servidor. Verifique sua internet.");
-      }
-  };
-
-  const handleLogout = () => {
-      setUser(null);
-      setCurrentView('mural');
-  };
-
-  const onAddButtonClick = () => {
-      if (!user) return;
-      if (user.role === 'visitor') {
-          alert("🔒 Modo Visitante\n\nCrie uma conta para registrar suas ações!");
-          return;
-      }
-      setShowAddForm(true);
+  const showToast = (msg: string, icon: string = 'bolt') => {
+      setToastMessage({ msg, icon });
+      setTimeout(() => setToastMessage(null), 3500);
   };
 
   const handleAddAction = async (type: ActionType, friendName: string) => {
     if (!user || user.role === 'visitor') return;
-
-    // Remove ID manual, o Firebase cria automático, mas precisamos passar o objeto sem ID e depois pegar o ID gerado se necessário
-    // Ou geramos um ID antes. Vamos deixar o Firebase gerar o ID do documento, mas salvaremos um ID dentro do objeto por compatibilidade
     
-    const newActionBase = {
-        userId: user.uid,
-        userName: user.firstName, 
-        userColor: user.avatarColor,
-        userPhotoUrl: user.photoUrl || '',
-        friendName,
-        action: type,
-        timestamp: new Date().toISOString(),
-        prayedBy: []
-    };
+    const xpTable = { [ActionType.OREI]: 10, [ActionType.CUIDEI]: 15, [ActionType.COMPARTILHEI]: 25, [ActionType.CONVIDEI]: 50 };
+    const xpGain = xpTable[type];
+    const newXp = (user.xp || 0) + xpGain;
+    const newLevel = Math.floor(newXp / 100) + 1;
+
+    const today = new Date().toISOString().split('T')[0];
+    const lastDate = user.lastActionDate;
+    let newStreak = user.streak || 0;
+    if (lastDate !== today) {
+        const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+        newStreak = (lastDate === yesterday) ? newStreak + 1 : 1;
+    }
 
     try {
-        await addDoc(collection(db, "actions"), newActionBase);
-        setToastMessage("Ação Registrada e Sincronizada! 🚀");
-        setShowAddForm(false);
-        setCurrentView('mural');
-    } catch (e) {
-        console.error("Erro ao salvar ação", e);
-        setToastMessage("Erro ao salvar. Tente novamente.");
-    }
-  };
+        await addDoc(collection(db, "actions"), {
+            userId: user.uid, userName: user.firstName, userColor: user.avatarColor,
+            friendName, action: type,
+            timestamp: new Date().toISOString(), prayedBy: []
+        });
 
-  const handleToggleActionSupport = async (actionId: string) => {
-      if (!user) return;
-      
-      const actionToUpdate = actions.find(a => a.id === actionId);
-      if (!actionToUpdate) return;
+        await updateDoc(doc(db, "users", user.uid), { 
+            xp: newXp, level: newLevel, streak: newStreak, lastActionDate: today 
+        });
 
-      const hasPrayed = actionToUpdate.prayedBy.includes(user.uid);
-      const newPrayedBy = hasPrayed
-          ? actionToUpdate.prayedBy.filter(uid => uid !== user.uid)
-          : [...actionToUpdate.prayedBy, user.uid];
-
-      if (!hasPrayed && navigator.vibrate) navigator.vibrate(50);
-
-      try {
-          const actionRef = doc(db, "actions", actionId);
-          await updateDoc(actionRef, { prayedBy: newPrayedBy });
-      } catch (e) {
-          console.error("Erro ao curtir ação", e);
-      }
-  };
-
-  const handleUpdateUser = async (updatedUser: User) => {
-      try {
-          // 1. Atualizar documento do usuário
-          const userRef = doc(db, "users", updatedUser.uid);
-          await updateDoc(userRef, {
-              firstName: updatedUser.firstName,
-              lastName: updatedUser.lastName,
-              avatarColor: updatedUser.avatarColor,
-              photoUrl: updatedUser.photoUrl || ''
-          });
-
-          // Opcional: Atualizar dados históricos. 
-          // No NoSQL (Firebase), é comum desnormalizar dados.
-          // Para um app pequeno, podemos fazer queries e atualizar tudo (Batch Update).
-          // Para simplificar aqui, vamos confiar que o app exibe a foto nova baseada no ID do usuário se fizermos join no front,
-          // MAS como o app atual salva nome/foto na Ação, seria ideal atualizar.
-          // ATENÇÃO: Em produção com muitos dados, isso deve ser feito via Cloud Function. Aqui faremos no front com cuidado.
-          
-          // NÃO vamos atualizar todas as ações históricas agora para evitar muitas leituras/escritas no plano free do Firebase
-          // O usuário verá os dados novos no perfil, mas ações antigas podem manter o nome antigo por enquanto (snapshot histórico).
-          
-          setUser(updatedUser);
-          setToastMessage("Perfil Salvo na Nuvem! ✅");
-
-      } catch (e) {
-          console.error("Erro ao atualizar perfil", e);
-          setToastMessage("Erro ao salvar perfil.");
-      }
-  };
-
-  const handleClearData = () => {
-      // Como agora é na nuvem, "limpar dados" é perigoso. Vamos apenas limpar o cache local/logout.
-      if (window.confirm("Isso desconectará sua conta deste dispositivo.")) {
-          handleLogout();
-      }
+        showToast(`Impacto +${xpGain} XP!`, 'rocket_launch');
+    } catch (e) { console.error(e); showToast("Erro ao postar", "error"); }
   };
 
   const handleAddPrayerRequest = async (category: PrayerCategory, description: string) => {
       if (!user) return;
-      
-      const newRequestBase = {
-          userId: user.uid,
-          userName: user.firstName,
-          userAvatarColor: user.avatarColor,
-          userPhotoUrl: user.photoUrl || '',
-          category,
-          description,
-          prayedBy: [],
-          timestamp: new Date().toISOString()
-      };
-
       try {
-          await addDoc(collection(db, "prayers"), newRequestBase);
-          setToastMessage("Pedido de Oração Enviado para a Rede 🙏");
-      } catch (e) {
-          console.error("Erro ao enviar oração", e);
-          setToastMessage("Erro ao enviar.");
-      }
+          await addDoc(collection(db, "prayers"), {
+              userId: user.uid, userName: user.firstName, userAvatarColor: user.avatarColor,
+              category, description, prayedBy: [], timestamp: new Date().toISOString()
+          });
+          showToast("Pedido no Mural!", "volunteer_activism");
+      } catch (e) { console.error(e); }
   };
 
   const handleTogglePray = async (requestId: string) => {
       if (!user) return;
-
-      const reqToUpdate = prayerRequests.find(r => r.id === requestId);
-      if (!reqToUpdate) return;
-
-      const hasPrayed = reqToUpdate.prayedBy.includes(user.uid);
-      const newPrayedBy = hasPrayed 
-          ? reqToUpdate.prayedBy.filter(uid => uid !== user.uid)
-          : [...reqToUpdate.prayedBy, user.uid];
-
-      try {
-          const reqRef = doc(db, "prayers", requestId);
-          await updateDoc(reqRef, { prayedBy: newPrayedBy });
-      } catch (e) {
-          console.error("Erro ao orar", e);
-      }
+      const req = prayerRequests.find(r => r.id === requestId);
+      if (!req) return;
+      const newPrayedBy = req.prayedBy.includes(user.uid) ? req.prayedBy.filter(u => u !== user.uid) : [...req.prayedBy, user.uid];
+      await updateDoc(doc(db, "prayers", requestId), { prayedBy: newPrayedBy });
+      if (!req.prayedBy.includes(user.uid)) showToast("Você Orou! 🔥", "bolt");
   };
 
-  // If not logged in, show Welcome Screen
-  if (!user) {
-      return <WelcomeScreen onLogin={handleLogin} />;
-  }
+  const handleLogin = async (userData: User) => {
+      const userRef = doc(db, "users", userData.uid);
+      const userSnap = await getDocs(query(collection(db, "users"), where("uid", "==", userData.uid)));
+      
+      if (userSnap.empty) {
+          const colors = [
+              'bg-primary', 'bg-action-blue', 'bg-action-green', 'bg-action-orange',
+              'bg-purple-600', 'bg-pink-500', 'bg-red-500', 'bg-orange-500',
+              'bg-amber-500', 'bg-lime-500', 'bg-emerald-500', 'bg-teal-500',
+              'bg-sky-500', 'bg-indigo-500', 'bg-violet-500', 'bg-rose-500'
+          ];
+          userData.avatarColor = colors[Math.floor(Math.random() * colors.length)];
+          await setDoc(userRef, userData);
+      } else {
+          userData = userSnap.docs[0].data() as User;
+      }
+      setUser(userData);
+      localStorage.setItem('vibeteen_user_session', JSON.stringify(userData));
+  };
+
+  const handleLogout = () => {
+      setUser(null);
+      localStorage.removeItem('vibeteen_user_session');
+  };
+
+  if (!user) return <WelcomeScreen onLogin={handleLogin} />;
 
   return (
     <div className="bg-background min-h-screen text-gray-900 font-sans overflow-hidden relative">
-      
-      {/* Toast Notification */}
       {toastMessage && (
-          <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[70] animate-in slide-in-from-top-4 duration-300 fade-in pointer-events-none">
-              <div className="bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 border border-gray-700">
-                  <span className="material-symbols-outlined text-primary">check_circle</span>
-                  <span className="text-xs font-bold uppercase tracking-wider">{toastMessage}</span>
+          <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[150] animate-in slide-in-from-top-10 duration-500">
+              <div className="bg-gray-900 text-white px-8 py-4 rounded-[2rem] shadow-2xl flex items-center gap-3 border-2 border-primary/20">
+                  <span className="material-symbols-outlined text-primary text-2xl filled">{toastMessage.icon}</span>
+                  <span className="text-[11px] font-black uppercase tracking-[0.2em]">{toastMessage.msg}</span>
               </div>
           </div>
       )}
 
-      {/* View Router */}
       <main className="w-full h-screen relative">
-        {currentView === 'mural' && (
-            <Mural 
-                actions={actions} 
-                onAddClick={onAddButtonClick}
-                mission={dailyMission}
-                isVisitor={user.role === 'visitor'}
-                currentUser={user}
-                onToggleSupport={handleToggleActionSupport}
-            />
-        )}
+        {currentView === 'mural' && <Mural actions={actions} onAddClick={() => setShowAddForm(true)} mission={dailyMission} isVisitor={user.role === 'visitor'} currentUser={user} onToggleSupport={() => {}} />}
         {currentView === 'rank' && <Stats actions={actions} />}
-        {currentView === 'members' && (
-            <MembersList 
-                members={members} 
-                currentUser={user}
-                prayerRequests={prayerRequests}
-                onAddPrayer={handleAddPrayerRequest}
-                onPray={handleTogglePray}
-            />
-        )}
-        {currentView === 'profile' && (
-            <Profile 
-                user={user} 
-                actions={actions} 
-                onUpdateUser={handleUpdateUser} 
-                onLogout={handleLogout}
-                onClearData={handleClearData}
-            />
-        )}
+        {currentView === 'members' && <MembersList members={members} currentUser={user} prayerRequests={prayerRequests} onAddPrayer={handleAddPrayerRequest} onPray={handleTogglePray} />}
+        {currentView === 'profile' && <Profile user={user} actions={actions} onUpdateUser={async (u) => await updateDoc(doc(db, "users", u.uid), u as any)} onLogout={handleLogout} />}
       </main>
 
-      {/* Action Form Modal */}
-      {showAddForm && (
-        <ActionForm 
-            user={user} 
-            onClose={() => setShowAddForm(false)} 
-            onSubmit={handleAddAction} 
-        />
-      )}
+      {showAddForm && <ActionForm user={user} onClose={() => setShowAddForm(false)} onSubmit={handleAddAction} />}
 
-      {/* Bottom Navigation */}
       <nav className="fixed bottom-0 w-full z-40 px-4 pb-6 pt-2 pointer-events-none">
-        <div className="h-[72px] w-full max-w-lg mx-auto bg-white/90 backdrop-blur-xl border border-gray-200 rounded-2xl shadow-2xl shadow-gray-200/50 flex items-center justify-between px-4 relative pointer-events-auto">
-            {/* Active Indicator Background */}
-            <div 
-                className={`absolute top-1/2 -translate-y-1/2 w-14 h-12 bg-primary/20 rounded-xl -z-10 transition-all duration-300`}
-                style={{
-                    left: currentView === 'mural' ? '1rem' : 
-                          currentView === 'rank' ? 'calc(25% + 0.5rem)' : 
-                          currentView === 'members' ? 'calc(50% + 0.5rem)' : 
-                          'calc(75% + 0.5rem)'
-                }}
-            />
-            
-            <button 
-                onClick={() => setCurrentView('mural')}
-                className={`flex flex-col items-center justify-center gap-1 w-14 h-full transition-colors ${currentView === 'mural' ? 'text-black' : 'text-gray-400'}`}
-            >
-                <span className={`material-symbols-outlined text-[24px] ${currentView === 'mural' ? 'font-bold fill-current' : ''}`}>grid_view</span>
-                <span className="text-[9px] font-medium">Mural</span>
-            </button>
-
-            <button 
-                onClick={() => setCurrentView('rank')}
-                className={`flex flex-col items-center justify-center gap-1 w-14 h-full transition-colors ${currentView === 'rank' ? 'text-black' : 'text-gray-400'}`}
-            >
-                <span className={`material-symbols-outlined text-[24px] ${currentView === 'rank' ? 'font-bold fill-current' : ''}`}>leaderboard</span>
-                <span className="text-[9px] font-medium">Rank</span>
-            </button>
-
-            <button 
-                onClick={() => setCurrentView('members')}
-                className={`flex flex-col items-center justify-center gap-1 w-14 h-full transition-colors ${currentView === 'members' ? 'text-black' : 'text-gray-400'}`}
-            >
-                <span className={`material-symbols-outlined text-[24px] ${currentView === 'members' ? 'font-bold fill-current' : ''}`}>groups</span>
-                <span className="text-[9px] font-medium">Rede</span>
-            </button>
-
-            <button 
-                onClick={() => setCurrentView('profile')}
-                className={`flex flex-col items-center justify-center gap-1 w-14 h-full transition-colors ${currentView === 'profile' ? 'text-black' : 'text-gray-400'}`}
-            >
-                <div className={`w-6 h-6 rounded-full overflow-hidden border-2 ${currentView === 'profile' ? 'border-black' : 'border-transparent'}`}>
-                    <img src={user.photoUrl || `https://picsum.photos/200/200?random=${user.uid}`} alt="Me" className="w-full h-full object-cover" />
+        <div className="h-[76px] w-full max-w-lg mx-auto bg-white/95 backdrop-blur-xl border border-gray-200 rounded-[2.5rem] shadow-2xl flex items-center justify-between px-8 pointer-events-auto">
+            <NavBtn icon="grid_view" label="Mural" active={currentView === 'mural'} onClick={() => setCurrentView('mural')} />
+            <NavBtn icon="leaderboard" label="Vibe" active={currentView === 'rank'} onClick={() => setCurrentView('rank')} />
+            <NavBtn icon="volunteer_activism" label="Oração" active={currentView === 'members'} onClick={() => setCurrentView('members')} />
+            <button onClick={() => setCurrentView('profile')} className={`flex flex-col items-center gap-1 transition-all ${currentView === 'profile' ? 'scale-125' : 'opacity-40 grayscale'}`}>
+                <div className={`w-8 h-8 rounded-2xl flex items-center justify-center border-2 transition-all ${currentView === 'profile' ? 'border-primary' : 'border-gray-200'} ${user.avatarColor}`}>
+                    <span className="material-symbols-outlined text-white text-xs opacity-50">person</span>
                 </div>
-                <span className="text-[9px] font-medium">Perfil</span>
             </button>
         </div>
       </nav>
-      
-      {/* Vignette Overlay */}
-      <div className="fixed inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.05)_100%)] z-10" />
     </div>
   );
 };
+
+const NavBtn = ({ icon, label, active, onClick }: any) => (
+    <button onClick={onClick} className={`flex flex-col items-center gap-1 transition-all ${active ? 'text-black scale-110' : 'text-gray-400 opacity-40 hover:opacity-100'}`}>
+        <span className={`material-symbols-outlined text-[26px] ${active ? 'font-black filled' : ''}`}>{icon}</span>
+        <span className="text-[8px] font-black uppercase tracking-widest">{label}</span>
+    </button>
+);
 
 export default App;
